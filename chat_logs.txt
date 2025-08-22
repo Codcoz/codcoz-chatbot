@@ -1,0 +1,9 @@
+Usuário: Olá, bot!
+Bot: Olá! Eu estou pronto para ajudar. Por favor, me diga o que você precisa.
+---
+Usuário: Olá, meu nome é Carlinhos!
+Bot: Ok, Carlinhos!
+---
+Usuário: Olá, meu nome é Carlinhos!
+Bot: Olá! Eu sou um modelo de linguagem grande. Posso ajudar com muitas coisas, como responder a perguntas, gerar texto criativo e traduzir idiomas. Como posso te ajudar hoje, Carlinhos?
+---
