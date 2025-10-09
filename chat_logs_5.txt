@@ -1,7 +1,0 @@
-Usuário: Como você está?
-Bot: Olá, seja bem-vindo(a)! É um prazer representarmos nossa empresa e o sistema de gestão.
-
-Como um assistente virtual da Sustria, estou sempre pronto para fornecer informações e suporte sobre o CodCoz e nossas operações.
-
-Como posso ajudá-lo(a) hoje em relação aos nossos serviços ou ao aplicativo CodCoz?
----
