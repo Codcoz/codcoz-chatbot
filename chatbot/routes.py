@@ -1,5 +1,5 @@
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Flask
 from .main import process_message
 
 chatbot_bp = Blueprint("chatbot", __name__)
