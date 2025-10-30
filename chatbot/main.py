@@ -11,7 +11,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
  
 #Armazenando o histórico
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.runnables.history import (
+    RunnableWithMessageHistory,
+    RunnablePassthrough,
+    RunnableLambda
+)
 from langchain_community.chat_message_histories import ChatMessageHistory 
 from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
 #Libs para o prompt
@@ -22,7 +26,7 @@ from langchain_core.prompts import (
     HumanMessagePromptTemplate,
     AIMessagePromptTemplate
 )
-
+from faqTool import get_faq_context
 
 
 load_dotenv()
@@ -257,7 +261,15 @@ chain = RunnableWithMessageHistory(
     history_messages_key="chat_history",
     input_messages_key="input"
 )
- 
+
+faq_chain_core = (
+    RunnablePassthrough.assign(
+        context=itemgetter("input") | RunnableLambda(get_faq_context)
+    )
+    | prompt_faq
+    | llm_fast
+    | StrOutputParser()
+)
 
 def generate_bot_reply(user_message: str, id:str) -> str:
     try:
