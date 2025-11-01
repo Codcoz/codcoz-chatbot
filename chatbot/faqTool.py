@@ -3,8 +3,11 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
+from dotenv import load_dotenv
 
-PDF_PATH = "FAQ_codcoz_v2.pdf"
+load_dotenv()
+
+PDF_PATH = "./chatbot/FAQ_codcoz_v2.pdf"
 
 embeddings = GoogleGenerativeAIEmbeddings(
     model="models/text-embedding-004",

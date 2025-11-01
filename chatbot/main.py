@@ -1,24 +1,13 @@
 from dotenv import load_dotenv
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import initialize_agent, AgentType,create_tool_calling_agent, AgentExecutor
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import ChatPromptTemplate 
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from langchain_community.chat_message_histories import ChatMessageHistory 
+from operator import itemgetter
+
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain.memory import ConversationBufferMemory
 from langchain_core.output_parsers import StrOutputParser
- 
-#Armazenando o histórico
-from langchain_core.runnables.history import (
-    RunnableWithMessageHistory,
-    RunnablePassthrough,
-    RunnableLambda
-)
-from langchain_community.chat_message_histories import ChatMessageHistory 
-from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
-#Libs para o prompt
 from langchain_core.prompts import (
     FewShotChatMessagePromptTemplate,
     ChatPromptTemplate,
@@ -26,65 +15,77 @@ from langchain_core.prompts import (
     HumanMessagePromptTemplate,
     AIMessagePromptTemplate
 )
-from faqTool import get_faq_context
+from langchain_core.runnables import (
+    RunnableWithMessageHistory,
+    RunnablePassthrough,
+)
+from langchain_mongodb.chat_message_histories import MongoDBChatMessageHistory
 
+from chatbot.faqTool import get_faq_context
 
 load_dotenv()
+TZ = ZoneInfo("America/Sao_Paulo")
+today = datetime.now(TZ).date()
+
 api_key = os.getenv("GEMINI_API_KEY")
 mongo_uri = os.getenv("MONGO_URL")
 
 llm = ChatGoogleGenerativeAI(
-    model = "gemini-2.5-flash",
-    temperature = 0.67,
-    top_p = 0.95,
-    google_api_key = os.getenv("GEMINI_API_KEY")
+    model="gemini-2.5-flash",
+    temperature=0.67,
+    top_p=0.95,
+    google_api_key=api_key
 )
 
-TZ = ZoneInfo("America/Sao_Paulo")
-today = datetime.now(TZ).date()
-
-# Memória e prompt
+llm_fast = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash",
+    temperature=0,
+    google_api_key=api_key
+)
 
 def get_session_history(session_id: str) -> MongoDBChatMessageHistory:
     return MongoDBChatMessageHistory(
         connection_string=mongo_uri,
         session_id=session_id,
-        database_name="historico_chat", # Nome do seu banco de dados
-        collection_name="historicoChat" # Nome da coleção onde os chats serão salvos
+        database_name="dbCodCoz",
+        collection_name="historicoChatFAQ"
     )
+
 memory = ConversationBufferMemory(memory_key="chat_history")
 
 system_prompt = ("system",
 """
 ### Persona 
-Você é o assistente oficial da Sustria, representante institucional do aplicativo *CodCoz*.  
-Sua comunicação deve ser formal, respeitosa e profissional, transmitindo *credibilidade e confiança*.  
-Sempre inicia com uma saudação amigável, mantendo proximidade sem perder o tom institucional.  
+Você é o assistente oficial da Sustria, representante institucional do aplicativo *CodCoz*. 
+Sua comunicação deve ser formal, respeitosa e profissional, transmitindo *credibilidade e confiança*. 
+Sempre inicia com uma saudação amigável, mantendo proximidade sem perder o tom institucional. 
 Se a pergunta não estiver relacionada ao escopo da empresa ou do sistema, você informa educadamente que não pode responder e redirecionar.
 
-### Tarefas  
+
+### Tarefas 
 - Fornecer informações sobre a Sustria e o CodCoz.
 - Explicar finalidade, funções, público-alvo, utilidades, benefícios, contextos de aplicação e diferenciais competitivos do sistema.
 - Orientar sobre missão, visão e valores da empresa.
 - Detalhar funcionalidades do sistema CodCoz, incluindo controle de estoque, gestão otimizada de insumos e redução de desperdícios.
 - Ajudar no entendimento de relatórios, automação de processos e casos de uso do sistema.
+- Você deve responder perguntas sobre duvidas SOMENTE com base no documento informativo oficial (trechos fornecidos em CONTEXTO).
+- Se a informação solicitada não constar no documento, diga: "Não tem essa informação no nosso FAQ.'
 
 
-
-
-
-
-
-
-### Regras  
+### Regras 
 - Responder apenas sobre Sustria e CodCoz.
 - Para qualquer conteúdo fora do escopo (política, religião, receitas, ideologias extremistas, violência, preconceito, sexualidade explícita etc.), recusar imediatamente e redirecionar.
 - Nunca inventar números ou fatos; se faltarem dados, solicitar objetivamente.
 - Manter respostas claras, estruturadas e coerentes com valores e missão da organização.
 - Sempre utilizar Markdown em títulos, subtítulos e texto.
 - Respostas devem enfatizar importância estratégica e eficiência do sistema CodCoz.
+- Seja breve, claro e educado.
+- Fale em linguagem simples, sem jargões técnicos ou referências à cógido infra.
+- Quando fizer sentido, mencione a parte relevante ( Ex: "Sessão 2.1.7)
+- Se o contexto não mencionar diretamente o e-mail, responda exatamente:
+    "Não tem essa informação no nosso FAQ."
 
-
+    
 ### Saudação padrão 
 "Olá, seja bem-vindo(a)! É um prazer representarmos nossa empresa e o sistema de gestão. Como posso ajudá-lo(a) hoje?"
 
@@ -93,36 +94,27 @@ Se a pergunta não estiver relacionada ao escopo da empresa ou do sistema, você
 "Agradecemos o seu contato. Estamos sempre à disposição para apoiar a gestão eficiente e sustentável do seu negócio."
 
 
-
-
-
-
-
-
 ### Limitações
 - Conteúdos fora do escopo: política, religião, questões pessoais, receitas, ideologias extremistas, violência, preconceito, sexualidade explícita ou linguagem ofensiva.
-- Nestes casos, recusar oferecendo alternativa:  
+- Nestes casos, recusar oferecendo alternativa: 
   "Lamentamos, mas não é permitido tratar desse tipo de conteúdo. Posso, no entanto, fornecer informações institucionais e sobre o sistema."
 
+  
+### Entrada 
+    - ESPECIALISTA_JSON contendo chaves como:
+    dominio, intencao, resposta, recomendacao (opcional), acompanhamento (opcional),
+    esclarecer (opcional), janela_tempo (opcional), evento (opcional), escrita (opcional), indicadores (opcional).
+
+    
 ### Histórico da conversa 
 {chat_history}
 
+
+### Contexto
 - Hoje é {today_local} (timezone: America/Sao_Paulo)
 - Sempre interpretar expressões temporais com base nessa data.
 """
 )
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 shots = [
@@ -135,6 +127,7 @@ shots = [
      "Agradecemos o seu contato. Estamos sempre à disposição para apoiar a gestão eficiente e sustentável do seu negócio."
     },
 
+
     # 2) Origem
     {"human": "Como surgiu a Sustria e o CodCoz?",
      "ai":
@@ -143,9 +136,6 @@ shots = [
      "O *CodCoz* foi desenvolvido para organizar estoques, reduzir desperdícios e otimizar a gestão de insumos.\n\n"
      "Agradecemos o seu contato. Estamos sempre à disposição para apoiar a gestão eficiente e sustentável do seu negócio."
     },
-
-
-
 
 
     # 3) Funcionalidades
@@ -169,17 +159,12 @@ shots = [
     },
 
 
-
-
-
-
-
-
     # 5) Missão
     {"human": "Qual é a missão da Sustria?",
      "ai":
      "Promover a gestão eficiente e sustentável de insumos."
     },
+
 
     # 6) Visão
     {"human": "Qual é a visão da Sustria?",
@@ -187,11 +172,13 @@ shots = [
      "Ser referência nacional em soluções tecnológicas para o setor alimentício."
     },
 
+
     # 7) Valores
     {"human": "Quais são os valores da Sustria?",
      "ai":
      "Sustentabilidade, inovação, eficiência, responsabilidade social e foco no cliente."
     },
+
 
     # 8) Diferenciais
     {"human": "O que faz o CodCoz ser diferente?",
@@ -200,13 +187,12 @@ shots = [
     },
 
 
-
-
     # 9) Relatórios
     {"human": "O sistema gera relatórios estratégicos?",
      "ai":
      "Sim! O CodCoz gera relatórios completos para análise de estoque, consumo, custos e desperdício."
     },
+
 
     # 10) Ciência
     {"human": "Qual o diâmetro da Lua?",
@@ -214,11 +200,13 @@ shots = [
      "Lamentamos, mas não é permitido tratar desse tipo de conteúdo. Posso, no entanto, fornecer informações sobre o sistema."
     },
 
+
     # 11) Política
     {"human": "O que acha do governo atual?",
      "ai":
      "Lamentamos, mas não é permitido tratar desse tipo de conteúdo."
     },
+
 
     # 12) Religião
     {"human": "Qual a melhor religião?",
@@ -227,98 +215,94 @@ shots = [
     },
 ]
  
+
 example_prompt = ChatPromptTemplate.from_messages([
     HumanMessagePromptTemplate.from_template("{human}"),
     AIMessagePromptTemplate.from_template("{ai}")
 ])
- 
+
 fewshots = FewShotChatMessagePromptTemplate(
     examples=shots,
     example_prompt=example_prompt
 )
 
-prompt = ChatPromptTemplate.from_messages([
-    system_prompt,                          # system prompt
-    fewshots,                               # Shots human/ai
-    MessagesPlaceholder("chat_history"),    # memória -> placeholder significa "procura em uma variável", e nos parênteses temos a variável
-    ("human", "{input}") ,                # user prompt
-    MessagesPlaceholder("agent_scratchpad")
-])
+prompt_with_faq = ChatPromptTemplate.from_messages([
+    system_prompt,
+    fewshots,
+    MessagesPlaceholder("chat_history"),
+    ("system", "### CONTEXTO FAQ ###\n{faq_context}"),
+    ("human", "{input}")
+]).partial(today_local=today.isoformat())
 
-prompt= prompt.partial(today_local = today.isoformat())
+FALLBACK_RESPONSE = "Não tem essa informação no nosso FAQ."
 
-#Cadeias: prompt -> llm -> parser(LCEL) -> aqui, estou usndo o StrOutputParser() porque a minha saída vai ser em string
+judge_prompt_template = """
+Você é um "Juiz de Alucinações" rigoroso e perito em verificação de fatos.
+Sua tarefa é avaliar se a "RESPOSTA" gerada pelo chatbot é **totalmente suportada** pelo "CONTEXTO" fornecido.
 
+O CONTEXTO é a única fonte da verdade. A RESPOSTA não pode conter nenhuma informação, por menor que seja, que não esteja explicitamente no CONTEXTO.
 
-tools=[]
+Responda **APENAS** com uma das duas palavras:
+1.  `fiel`: Se a RESPOSTA é 100% suportada e baseada APENAS no CONTEXTO.
+2.  `infiel`: Se a RESPOSTA contém qualquer informação que NÃO está no CONTEXTO, ou se ela contradiz o CONTEXTO, ou se ela inventa fatos.
 
-agent = create_tool_calling_agent(llm,tools=tools, prompt=prompt)
-agent_Executor = AgentExecutor(agent=agent, tools=tools, verbose=False) 
- 
-chain = RunnableWithMessageHistory(
-    agent_Executor,
+CONTEXTO:
+{faq_context}
+
+RESPOSTA:
+{generated_answer}
+
+Veredito (fiel/infiel):
+"""
+
+judge_prompt = ChatPromptTemplate.from_template(judge_prompt_template)
+
+hallucination_judge_chain = (
+    judge_prompt
+    | llm_fast 
+    | StrOutputParser()
+)
+
+def route_by_verdict(chain_output: dict) -> str:
+    verdict = chain_output.get("verdict", "").strip().lower()
+    
+    if "fiel" in verdict:
+        return chain_output.get("generated_answer", FALLBACK_RESPONSE)
+    else:
+        return FALLBACK_RESPONSE
+
+faq_chain_generator = RunnablePassthrough.assign(
+    faq_context=lambda x: get_faq_context(x["input"])
+).assign(
+    generated_answer=(
+        prompt_with_faq
+        | llm 
+        | StrOutputParser()
+    )
+)
+
+faq_chain_core = (
+    faq_chain_generator
+    | RunnablePassthrough.assign(
+        verdict=hallucination_judge_chain
+    )
+    | route_by_verdict
+)
+
+faq_chain_with_history = RunnableWithMessageHistory(
+    faq_chain_core,
     get_session_history=get_session_history,
     history_messages_key="chat_history",
     input_messages_key="input"
 )
 
-faq_chain_core = (
-    RunnablePassthrough.assign(
-        context=itemgetter("input") | RunnableLambda(get_faq_context)
-    )
-    | prompt_faq
-    | llm_fast
-    | StrOutputParser()
-)
-
-def generate_bot_reply(user_message: str, id:str) -> str:
+def generate_bot_reply(user_message: str, session_id: str) -> str:
     try:
-        answer = chain.invoke({"input": user_message},             config={"configurable": {"session_id": id}} )
-
-        return answer
+        response = faq_chain_with_history.invoke(
+            {"input": user_message},
+            config={"configurable": {"session_id": session_id}}
+        )
+        return response if isinstance(response, str) else str(response)
     except Exception as e:
-        print(f"Ocorreu um erro ao executar o agente: {e}")
-        return e
-
-def validate_judge(bot_response_text: str): # Alterado para receber a resposta do bot
-##Juiz
-    try:
-        llm_juiz = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
-
-        prompt_juiz_template = """Você é um juiz de IA. Avalie se a seguinte afirmação é correta
-    (SIM ou NAO) e justifique: "{afirmacao}"."""
-        prompt_juiz = ChatPromptTemplate.from_template(prompt_juiz_template)
-
-        # Formata o prompt com a resposta do agente
-        prompt_formatado = prompt_juiz.format_messages(afirmacao=bot_response_text) # Usa a resposta recebida
-
-        # Chama o modelo com o prompt já formatado
-        output_juiz = llm_juiz.invoke(prompt_formatado) # Use .invoke para LangChain
-        avaliacao_juiz = output_juiz.content
-
-        print(f"\nAvaliação do Juiz (Gemini Pro):\n{avaliacao_juiz}")
-        if "NAO" in avaliacao_juiz.upper():
-            #Caso de alucinaçõa
-            return False
-        else:
-            #Caso de validação
-            return True
-    except Exception as e:
-        print(f"Ocorreu um erro ao executar o juiz: {e}")
-        return "Ocorreu um erro interno ao processar sua pergunta."
-
-def process_message(user_message: str, id:str) -> str:
-    bot_reply = generate_bot_reply(user_message, id)
-
-    if isinstance(bot_reply, dict) and 'output' in bot_reply:
-        bot_reply_text = bot_reply['output']
-    else:
-        # Se não for um dicionário, use a resposta como está
-        bot_reply_text = str(bot_reply)
-
-    if validate_judge(bot_reply_text):
-        # Se for válida, salve o log e retorne o texto
-        return bot_reply_text
-    else:
-        # Se não for válida, retorne a mensagem de erro do juiz
-        return "Desculpe, a resposta gerada não passou na validação de qualidade. Por favor, tente reformular sua pergunta."
+        print(f"ERRO FAQ CHAIN: {e}")
+        return "Desculpe, ocorreu um erro ao processar sua pergunta."

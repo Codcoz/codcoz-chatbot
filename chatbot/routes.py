@@ -1,6 +1,6 @@
 from datetime import datetime
 from flask import Blueprint, request, jsonify, Flask
-from .main import process_message
+from .main import generate_bot_reply 
 
 chatbot_bp = Blueprint("chatbot", __name__)
 
@@ -12,7 +12,7 @@ def chat(id):
     if not user_message:
         return jsonify({"error": "Mensagem vazia"}), 400
 
-    bot_response = process_message(user_message, id)
+    bot_response = generate_bot_reply (user_message, id)
     return jsonify({"response": bot_response, "session_id":id})
 
 @chatbot_bp.route("/health", methods=["GET"])
