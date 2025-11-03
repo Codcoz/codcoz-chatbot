@@ -4,6 +4,10 @@ from .main import generate_bot_reply
 
 chatbot_bp = Blueprint("chatbot", __name__)
 
+@chatbot_bp.route('/')
+def index():
+    return "Server is running OK"
+
 @chatbot_bp.route("/chat/<id>", methods=["POST"])
 def chat(id):
     data = request.get_json()
